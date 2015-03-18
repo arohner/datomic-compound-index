@@ -118,12 +118,6 @@ This returns all datoms where the initial part of the key is identical. dci/sear
 dci/search-range also supports :partial?
 
 ```clojure
-(d/index-range db :event/user-at-type "1234|1426550400000|" "1234|1426636800000|")
-```
-
-Note the use of the separator at the end, this is to avoid accidentally matching a longer string, like 1426550400000<b>1</b>
-
-```clojure
 (dci/search-range db :event/user-at-type [1234 1426550400000 {:partial? true}] [1234 1426636800000 {:partial? true}])
 ```
 
