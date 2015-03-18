@@ -44,7 +44,7 @@ Let's say the current time is `1426630517988` (epoch), and the user we're intere
                    :event/user 1234
                    :event/at 1426630517988
                    :event/user-at "1234|1426630517988"}])
-```clojure
+```
 
 To find all events created by that user today, without dci, we'd use d/index-range:
 
@@ -74,7 +74,7 @@ for inserting and querying on compound indices.
 
 Create an indexed attribute, of type string. In a comment/docstring,
 specify the type and order of values that will be indexed. When
-inserting new entities, use index-key on the attribute:
+inserting new entities, use index-key to create the value for the compound-indexed attribute:
 
 ```clojure
 (let [event-at (Date.)
@@ -113,9 +113,7 @@ When searching for a partial key (i.e. you know the first two values of a 3-valu
 ```clojure
 (dci/search db :user/type-created-at [:foo {:partial? true}])
 ```
-
 This returns all datoms where the initial part of the key is identical. dci/search can also be used for entire key lookups, but d/q might be more idiomatic.
-
 
 dci/search-range also supports :partial?
 
@@ -129,10 +127,16 @@ Note the use of the separator at the end, this is to avoid accidentally matching
 (dci/search-range db :event/user-at-type [1234 1426550400000 {:partial? true}] [1234 1426636800000 {:partial? true}])
 ```
 
+Under the covers, :partial? searches work by creating a partial
+index-key (i.e. a string shorter than the 'full' key), and then doing
+a substring match on values stored in the DB. Datomic indices are used
+(d/seek-datoms, and d/index-range, respectively), so these are
+efficient.
+
 # Limitations
 
 - index-key does not automatically update the compound index attribute when any of 'source' attributes change.
-- Using index-key with {:partial? true} won't work in d/q, unless you're searching for a completely specified key, because d/q doesn't support substring matches.
+- Using index-key with {:partial? true} won't work in d/q because d/q doesn't support substring matches.
 - keys are sorted & searched via string representation, lexographically.
 - datomic supports using re-find in a database function, but AFAICT, there's no way for it to use an index, so avoid re-find.
 
