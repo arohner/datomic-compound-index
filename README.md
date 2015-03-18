@@ -1,5 +1,7 @@
 # datomic-compound-index
 
+https://circleci.com/gh/arohner/datomic-compound-index.png?circle-token=228fa510d987f77a5d31f35611aefc1898beaa97
+
 A library that adds support for simple compound indices to datomic.
 
 # Motivating Example
