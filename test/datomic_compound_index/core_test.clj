@@ -1,5 +1,9 @@
 (ns datomic-compound-index.core-test
   (:require [clojure.test :refer :all]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [clojure.test.check.clojure-test :refer (defspec)]
             [datomic.api :as d]
             [datomic-compound-index.core :refer :all])
   (:import java.util.Date))
@@ -68,3 +72,41 @@
     (is (= 2 (count (search-range (d/db conn) :user/foo-bar
                                   [2 {:partial? true}]
                                   [4 {:partial? true}]))))))
+
+(defspec search-spec
+  100
+  (let [conn (empty-database)
+        schema [(attribute :user/foo :db.type/long)
+                (attribute :user/bar :db.type/long)
+                (attribute :user/foo-bar :db.type/string
+                           :db/index true)]]
+    @(d/transact conn schema)
+    (prop/for-all [values (gen/vector (gen/tuple gen/int gen/int))]
+      @(d/transact conn (for [[foo bar] values]
+                          {:db/id (d/tempid :db.part/user)
+                           :user/foo foo
+                           :user/bar bar
+                           :user/foo-bar (index-key [foo bar])}))
+      (let [db (d/db conn)]
+        (every? (fn [[foo bar]]
+                  (let [datomic (->> (d/q '[:find [?e ...] :in $ ?foo ?bar :where
+                                            [?e :user/foo ?foo]
+                                            [?e :user/bar ?bar]] db foo bar)
+                                     (sort))
+                        search-result (->> (search db :user/foo-bar [foo bar])
+                                           (mapv (fn [datom]
+                                                   (.e datom)))
+                                           (sort))
+                        eql? (= datomic search-result)]
+                    ;; (when-not eql?
+                    ;;   (inspect [values])
+                    ;;   (inspect [foo bar (index-key [foo bar])])
+                    ;;   (inspect (d/q '[:find [(pull ?e [*]) ...] :in $ ?foo ?bar :where
+                    ;;                   [?e :user/foo ?foo]
+                    ;;                   [?e :user/bar ?bar]] db foo bar))
+                    ;;   (inspect (->>
+                    ;;             (search db :user/foo-bar [foo bar])
+                    ;;             (mapv (fn [datom]
+                    ;;                     (d/pull db '[*] (.e datom))))))
+                    ;;   )
+                    eql?)) values)))))

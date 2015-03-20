@@ -22,10 +22,7 @@
                  separator]
           :or {partial? false
                separator "|"}}]
-   (let [k (str/join separator (map to-datomic args))]
-     (if partial?
-       (str k separator)
-       k))))
+   (str (str/join separator (map to-datomic args)) separator)))
 
 (defn strip-partial [key]
   (if (map? (last key))
