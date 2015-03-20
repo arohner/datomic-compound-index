@@ -121,17 +121,18 @@ Note that index-key converts values to resonable string representations, so j.u.
 When searching for a partial key (i.e. you know the first two values of a 3-value compound key) use dci/search:
 
 ```clojure
-(dci/search db :user/type-created-at [:foo {:partial? true}])
+(dci/search db :user/type-created-at [123 :foo])
 ```
+
 This returns all datoms where the initial part of the key is identical. dci/search can also be used for entire key lookups, but d/q might be more idiomatic.
 
-dci/search-range also supports :partial?
+dci/search-range also supports partial key searches:
 
 ```clojure
-(dci/search-range db :event/user-at-type [1234 1426550400000 {:partial? true}] [1234 1426636800000 {:partial? true}])
+(dci/search-range db :event/user-at-type [1234 1426550400000] [1234 1426636800000])
 ```
 
-Under the covers, :partial? searches work by creating a partial
+Under the covers, partial searches work by creating a partial
 index-key (i.e. a string shorter than the 'full' key), and then doing
 a substring match on values stored in the DB. Datomic indices are used
 (d/seek-datoms, and d/index-range, respectively), so these are
@@ -140,7 +141,7 @@ efficient.
 # Limitations
 
 - index-key does not automatically update the compound index attribute when any of 'source' attributes change.
-- Using index-key with {:partial? true} won't work in d/q because d/q doesn't support substring matches.
+- Using d/q with a partial index-key won't work because d/q doesn't support substring matches.
 - keys are sorted & searched via string representation, lexographically.
 - datomic supports using re-find in a database function, but AFAICT, there's no way for it to use an index, so avoid re-find.
 

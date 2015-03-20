@@ -18,13 +18,11 @@
 (defn index-key*
   ([args]
    (index-key* args {}))
-  ([args {:keys [partial?
-                 separator]
-          :or {partial? false
-               separator "|"}}]
+  ([args {:keys [separator]
+          :or {separator "|"}}]
    (str (str/join separator (map to-datomic args)) separator)))
 
-(defn strip-partial [key]
+(defn split-options [key]
   (if (map? (last key))
     [(butlast key) (last key)]
     [key nil]))
@@ -35,20 +33,14 @@
   key is a vector of datomc values, that can optionally end with a map of options
 
   options:
-  - :partial? Boolean
   - :separator String
-
-  When querying against a partial index (i.e. specifying fewer
-  attributes than are in the index), set partial? true, which adds a
-  separator to the end of the key, so queries don't inadvertently
-  match other rows
 
   Use separator to specify a different separator charactor between
   values in the index. Note that if separator is used, it must be used
   for all insertions and queries on that attribute.
 "
   [key]
-  (apply index-key* (strip-partial key)))
+  (apply index-key* (split-options key)))
 
 (defn search
   "Search a compound index. attr is the attribute to search. Returns a seq of datoms. key, key1,key2 are vectors that will be passed to index-key.
