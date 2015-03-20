@@ -47,7 +47,7 @@ The solution is to use a compound-index, an indexed attribute that contains both
 
 Let's say the current time is `1426630517988` (epoch), and the user we're interested in is user-id `1234`. Then we store
 
-"1234|1426630517988" in the attribute :event/user-at. Here we're assigning "|" as the separator character.
+"1234|1426630517988|" in the attribute :event/user-at. Here we're assigning "|" as the separator character.
 
 ```clojure
 (d/transact conn [{:db/id (d/tempid :events)
