@@ -29,8 +29,8 @@
     (is (re-find #"^[0-9|]+$" v))))
 
 (deftest index-key-works
-  (is (= "1|:foo" (index-key [1 :foo])))
-  (is (= "1|:foo|" (index-key [1 :foo {:partial? true}]))))
+  (is (= "1|:foo|" (index-key [1 :foo])))
+  (is (= "1|:foo|" (index-key [1 :foo]))))
 
 (deftest search-finds-things-correctly
   (let [schema [(attribute :user/foo-bar :db.type/string
@@ -45,13 +45,12 @@
                         :user/foo-bar (index-key [11 "bbq"])}
                        {:db/id (d/tempid :db.part/user)
                         :user/foo-bar (index-key [2 "baz"])}])
-    (is (= 2 (count (search (d/db conn) :user/foo-bar [1 {:partial? true}]))))
+    (is (= 2 (count (search (d/db conn) :user/foo-bar [1]))))
     (is (= 1 (count (search (d/db conn) :user/foo-bar [1 "bar"]))))
     (is (-> (search (d/db conn) :user/foo-bar [1 "bar"])
             (first)
             .v
-            (= "1|bar")
-            ))
+            (= "1|bar|")))
     (is (= 0 (count (search (d/db conn) :user/foo-bar [1 "bogus"]))))))
 
 (deftest search-range-finds-things-correctly
@@ -69,9 +68,7 @@
                         :user/foo-bar (index-key [4 "baz"])}
                        {:db/id (d/tempid :db.part/user)
                         :user/foo-bar (index-key [5 "quux"])}])
-    (is (= 2 (count (search-range (d/db conn) :user/foo-bar
-                                  [2 {:partial? true}]
-                                  [4 {:partial? true}]))))))
+    (is (= 2 (count (search-range (d/db conn) :user/foo-bar [2] [4]))))))
 
 (defspec search-spec
   100

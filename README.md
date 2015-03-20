@@ -53,13 +53,13 @@ Let's say the current time is `1426630517988` (epoch), and the user we're intere
 (d/transact conn [{:db/id (d/tempid :events)
                    :event/user 1234
                    :event/at 1426630517988
-                   :event/user-at "1234|1426630517988"}])
+                   :event/user-at "1234|1426630517988|"}])
 ```
 
 To find all events created by that user today, without dci, we'd use d/index-range:
 
 ```clojure
-(d/index-range db :event/user-at "1234|1426550400000" "1234|1426636800000")
+(d/index-range db :event/user-at "1234|1426550400000|" "1234|1426636800000|")
 ```
 
 This can also be extended past two attributes. Let's say we want to find all events of a specific type, by a certain user, on a specific day:
@@ -71,7 +71,7 @@ This can also be extended past two attributes. Let's say we want to find all eve
 ```
 
 ```clojure
-(d/index-range db :event/user-at-type "1234|1426550400000|:foo" "1234|1426636800000|:foo")
+(d/index-range db :event/user-at-type "1234|1426550400000|:foo|" "1234|1426636800000|:foo|")
 ```
 
 (of course, if your DB has :event/user-at-type, then :event/user-at is unnecessary).
