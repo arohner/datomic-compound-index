@@ -38,8 +38,7 @@
 
   Use separator to specify a different separator charactor between
   values in the index. Note that if separator is used, it must be used
-  for all insertions and queries on that attribute.
-"
+  for all insertions and queries on that attribute."
   [key]
   (apply index-key* (split-options key)))
 
@@ -60,8 +59,12 @@
 (defn search-range
   "Search a compound index. Returns a seq of datoms.
 
-  Uses d/index-range to find all datoms between key1 and key2, inclusive of key1, *exclusive* of key2"
+  Uses d/index-range to find all datoms between key1 and key2, inclusive"
   [db attr key1 key2]
-  (seq (d/index-range db attr
-                      (index-key key1)
-                      (index-key key2))))
+  (let [k1 (index-key key1)
+        k2 (index-key key2)
+        attr-id (:id (d/attribute db attr))]
+    (seq (take-while (fn [^Datum d]
+                       (and (= attr-id (.a d))
+                            (>= (compare (.v d) k1) 0)
+                            (<= (compare (.v d) k2) 0))) (d/seek-datoms db :avet attr key1)))))
