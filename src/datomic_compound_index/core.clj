@@ -1,7 +1,8 @@
 (ns datomic-compound-index.core
   (:require [clojure.string :as str]
             [datomic.api :as d])
-  (:import java.util.Date))
+  (:import java.util.Date
+           datomic.db.Datum))
 
 (defprotocol DatomicRepresentation
   (to-datomic [x]
@@ -50,9 +51,11 @@
    (search db :event/user-at-type [1234 (Date.) {:partial? true}])
  "
   ([db attr key]
-   (let [key (index-key key)]
-     (seq (take-while (fn [d]
-                        (.startsWith (.v d) key)) (d/seek-datoms db :avet attr key))))))
+   (let [key (index-key key)
+         attr-id (:id (d/attribute db attr))]
+     (seq (take-while (fn [^Datum d]
+                        (and (= attr-id (.a d))
+                             (.startsWith ^String (.v d) key))) (d/seek-datoms db :avet attr key))))))
 
 (defn search-range
   "Search a compound index. Returns a seq of datoms.
