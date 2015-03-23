@@ -68,7 +68,8 @@
                         :user/foo-bar (index-key [4 "baz"])}
                        {:db/id (d/tempid :db.part/user)
                         :user/foo-bar (index-key [5 "quux"])}])
-    (is (= 3 (count (search-range (d/db conn) :user/foo-bar [2] [4]))))))
+    (let [result (search-range (d/db conn) :user/foo-bar [2] [4])]
+      (is (= ["2|bar|" "3|bbq|" "4|baz|"] (map (fn [d] (.v d)) result))))))
 
 (defspec search-spec
   100

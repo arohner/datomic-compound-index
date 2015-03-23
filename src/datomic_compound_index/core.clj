@@ -64,7 +64,11 @@
   (let [k1 (index-key key1)
         k2 (index-key key2)
         attr-id (:id (d/attribute db attr))]
-    (seq (take-while (fn [^Datum d]
+    (->> (d/seek-datoms db :avet attr key1)
+         (seq)
+         (drop-while (fn [^Datum d]
+                       (not (.startsWith ^String (.v d) k1))))
+         (take-while (fn [^Datum d]
                        (and (= attr-id (.a d))
-                            (>= (compare (.v d) k1) 0)
-                            (<= (compare (.v d) k2) 0))) (d/seek-datoms db :avet attr key1)))))
+                            (or (<= (compare (.v d) k2) 0)
+                                (.startsWith ^String (.v d) k2))))))))
