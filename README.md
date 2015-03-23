@@ -149,7 +149,8 @@ efficient.
 
 Note that dci is still very early. I'm using it in staging, but not yet production. If you do use it production, be able to re-create the values of your compound indices (i.e. store the component pieces in other attributes).
 
-- 0.1.1: Added separator characters to all keys, even complete ones. This is a breaking schema change; meaning values inserted via 0.1.0 will not be accessible in 0.1.1.
+- 0.1.2: made search-range inclusive of the end key. Add type hints.
+- 0.1.1: Added separator characters to all keys, even complete ones. This is a breaking schema change; meaning values inserted via 0.1.0 will not be accessible in 0.1.1 unless they're re-asserted.
 - 0.1.0: Initial Release
 
 ## License
