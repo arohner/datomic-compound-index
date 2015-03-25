@@ -1,46 +1,49 @@
 (ns datomic-compound-index.core
   (:require [clojure.string :as str]
+            [clojure.data.fressian :as fress]
             [datomic.api :as d])
   (:import java.util.Date
-           datomic.db.Datum))
+           datomic.db.Datum
+           java.util.regex.Pattern))
 
-(defprotocol DatomicRepresentation
-  (to-datomic [x]
-    "Given a value that can be stored in datomic, returns a string representation of the value for use in a compound-index"))
+;; approaches
+;; get encoding to work properly
 
-(extend-protocol DatomicRepresentation
-  Object
-  (to-datomic [x]
-    (str x))
-  java.util.Date
-  (to-datomic [x]
-    (.getTime x)))
+(defprotocol SerializeKey
+  (to-bytes [this])
+  (from-bytes [this]))
 
-(defn index-key*
-  ([args]
-   (index-key* args {}))
-  ([args {:keys [separator]
-          :or {separator "|"}}]
-   (str (str/join separator (map to-datomic args)) separator)))
+(extend-protocol SerializeKey
+  java.lang.Long
+  (to-bytes [x]
+    (* -1 x))
+  (from-bytes [x]
+    (* -1 x)))
 
-(defn split-options [key]
-  (if (map? (last key))
-    [(butlast key) (last key)]
-    [key nil]))
+(defn serialize-key []
+  ()
+  )
 
+(defn deserialize-key [])
 (defn index-key
   "Create an index key. Can be used for inserting, or querying.
 
-  key is a vector of datomc values, that can optionally end with a map of options
-
-  options:
-  - :separator String
-
-  Use separator to specify a different separator charactor between
-  values in the index. Note that if separator is used, it must be used
-  for all insertions and queries on that attribute."
+  key is a vector of datomic values"
   [key]
-  (apply index-key* (split-options key)))
+  (.array (fress/write (to-bytes key))))
+
+(defn compound-compare
+  "compare operation. If the key is shorter than value, and all previous sub-keys match, returns 0"
+  [ak bk]
+  (loop [[a & as] ak
+         [b & bs] bk]
+    (if (or (nil? a)
+            (nil? b))
+      0
+      (let [result (compare a b)]
+        (if (= 0 result)
+          (recur as bs)
+          result)))))
 
 (defn search
   "Search a compound index. attr is the attribute to search. Returns a seq of datoms. key, key1,key2 are vectors that will be passed to index-key.
@@ -50,25 +53,28 @@
    (search db :event/user-at-type [1234 (Date.) {:partial? true}])
  "
   ([db attr key]
-   (let [key (index-key key)
-         attr-id (:id (d/attribute db attr))]
-     (seq (take-while (fn [^Datum d]
+   (let [attr-id (:id (d/attribute db attr))]
+     (->> (d/seek-datoms db :avet attr key)
+          (mapv identity)
+          (seq)
+          (drop-while (fn [^Datum d]
                         (and (= attr-id (.a d))
-                             (.startsWith ^String (.v d) key))) (d/seek-datoms db :avet attr key))))))
+                             (< (compound-compare (fress/read (.v d)) key) 0))))
+          (take-while (fn [^Datum d]
+                        (and (= attr-id (.a d))
+                             (= (compound-compare (fress/read (.v d)) key) 0))))))))
 
 (defn search-range
   "Search a compound index. Returns a seq of datoms.
 
   Uses d/index-range to find all datoms between key1 and key2, inclusive"
   [db attr key1 key2]
-  (let [k1 (index-key key1)
-        k2 (index-key key2)
-        attr-id (:id (d/attribute db attr))]
+  (let [attr-id (:id (d/attribute db attr))]
     (->> (d/seek-datoms db :avet attr key1)
          (seq)
          (drop-while (fn [^Datum d]
-                       (not (.startsWith ^String (.v d) k1))))
+                       (and (= attr-id (.a d))
+                            (< (compound-compare (fress/read (.v d)) key1) 0))))
          (take-while (fn [^Datum d]
                        (and (= attr-id (.a d))
-                            (or (<= (compare (.v d) k2) 0)
-                                (.startsWith ^String (.v d) k2))))))))
+                            (<= (compound-compare (fress/read (.v d)) key2) 0)))))))
