@@ -180,22 +180,22 @@
                                                    (.e datom)))
                                            (sort))
                         eql? (= datomic search-result)]
-                    ;; (when-not eql?
-                    ;;   (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
-                    ;;         datomic (->>
-                    ;;                  (d/q '[:find [?e ...] :in $ ?foo ?bar :where
-                    ;;                         [?e :user/foo ?foo]
-                    ;;                         [?e :user/bar ?bar]] db foo bar)
-                    ;;                  (mapv (fn [eid]
-                    ;;                          (search-vector db eid))))
-                    ;;         search-result (->>
-                    ;;                        (search db :user/foo-bar [foo bar])
-                    ;;                        (mapv (fn [datom]
-                    ;;                                (search-vector db (.e datom)))))]
-                    ;;     (inspect values)
-                    ;;     (inspect [foo bar])
-                    ;;     (inspect datomic)
-                    ;;     (inspect search-result)))
+                    (when-not eql?
+                      (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
+                            datomic (->>
+                                     (d/q '[:find [?e ...] :in $ ?foo ?bar :where
+                                            [?e :user/foo ?foo]
+                                            [?e :user/bar ?bar]] db foo bar)
+                                     (mapv (fn [eid]
+                                             (search-vector db eid))))
+                            search-result (->>
+                                           (search db :user/foo-bar [foo bar])
+                                           (mapv (fn [datom]
+                                                   (search-vector db (.e datom)))))]
+                        (println "values:" values)
+                        (println "foo:bar" [foo bar])
+                        (println "datomic:" datomic)
+                        (println "search-result:" search-result)))
                     eql?)) values)))))
 
 (defn search-test
@@ -270,15 +270,15 @@
                                          (.e datom)))
                                  (sort))
               eql? (= datomic search-result)]
-          ;; (when-not eql?
-          ;;   (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
-          ;;         all-values (mapv #(search-vector (d/db conn) %) all-values)
-          ;;         datomic-result (vec (map #(search-vector (d/db conn) %) datomic))
-          ;;         search-result (vec (map #(search-vector (d/db conn) %) search-result))]
-          ;;     (inspect all-values)
-          ;;     (inspect query)
-          ;;     (inspect datomic-result)
-          ;;     (inspect search-result)))
+          (when-not eql?
+            (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
+                  all-values (mapv #(search-vector (d/db conn) %) all-values)
+                  datomic-result (vec (map #(search-vector (d/db conn) %) datomic))
+                  search-result (vec (map #(search-vector (d/db conn) %) search-result))]
+              (println "all-values:" all-values)
+              (println "query:" query)
+              (println "datomic-result:" datomic-result)
+              (println "search-result" search-result)))
           eql?)))))
 
 (defn search-range-test
