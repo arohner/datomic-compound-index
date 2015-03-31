@@ -238,22 +238,30 @@
                          (insert-index-key :user/foo-bar [foo bar]))))
     (let [db (d/db conn)
           [[foo1 bar1] [foo2 bar2]] query
-          datomic-result (->> (d/q '[:find [?e ...] :in $ ?foo1 ?bar1 ?foo2 ?bar2  :where
-                                     [?e :user/foo ?efoo]
-                                     [?e :user/bar ?ebar]
-                                     (or
-                                      (and [(< ?foo1 ?efoo)]
-                                           [(identity ?bar1)]
-                                           [(identity ?ebar)])
-                                      (and [(= ?foo1 ?efoo)]
-                                           [(<= ?bar1 ?ebar)]))
-                                     (or
-                                      (and [(< ?efoo ?foo2)]
-                                           [(identity ?bar2)]
-                                           [(identity ?ebar)])
-                                      (and [(= ?efoo ?foo2)]
-                                           [(<= ?ebar ?bar2)]))]
-                                   db foo1 bar1 foo2 bar2)
+          datomic-result (->>
+                          (cond
+                            (and foo1 bar1 foo2 bar2)  (d/q '[:find [?e ...] :in $ ?foo1 ?bar1 ?foo2 ?bar2  :where
+                                                              [?e :user/foo ?efoo]
+                                                              [?e :user/bar ?ebar]
+                                                              (or
+                                                               (and [(< ?foo1 ?efoo)]
+                                                                    [(identity ?bar1)]
+                                                                    [(identity ?ebar)])
+                                                               (and [(= ?foo1 ?efoo)]
+                                                                    [(<= ?bar1 ?ebar)]))
+                                                              (or
+                                                               (and [(< ?efoo ?foo2)]
+                                                                    [(identity ?bar2)]
+                                                                    [(identity ?ebar)])
+                                                               (and [(= ?efoo ?foo2)]
+                                                                    [(<= ?ebar ?bar2)]))]
+                                                            db foo1 bar1 foo2 bar2)
+                            (and foo1 foo2)  (d/q '[:find [?e ...] :in $ ?foo1 ?foo2 :where
+                                                    [?e :user/foo ?efoo]
+                                                    [(<= ?foo1 ?efoo)]
+                                                    [(<= ?efoo ?foo2)]]
+                                                  db foo1 foo2)
+                            :else  (d/q '[:find [?e ...] :where [?e :user/foo-bar ?efoo]] db))
                               (map #(search-vector db %))
                               set)
           search-result (->> (apply search-range db :user/foo-bar query)
@@ -276,11 +284,20 @@
 
 (defspec search-range-spec
   100
-  (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))
+  (prop/for-all [values (gen/vector (gen/tuple gen/int gen/int))
                  query (gen/fmap (fn [[[foo1 bar1] [foo2 bar2]]]
                                    (if (> foo1 foo2)
                                      [[foo2 bar2] [foo1 bar1]]
-                                     [[foo1 bar1] [foo2 bar2]])) (gen/tuple (gen/tuple gen/pos-int gen/pos-int) (gen/tuple gen/pos-int gen/pos-int)))]
+                                     [[foo1 bar1] [foo2 bar2]])) (gen/tuple (gen/tuple gen/int gen/int) (gen/tuple gen/int gen/int)))]
+    (search-range-test values query)))
+
+(defspec search-range-partial-spec
+  100
+  (prop/for-all [values (gen/vector (gen/tuple gen/int gen/int))
+                 query (gen/fmap (fn [[[foo1] [foo2]]]
+                                   (if (> foo1 foo2)
+                                     [[foo2] [foo1]]
+                                     [[foo1] [foo2]])) (gen/tuple (gen/tuple gen/int) (gen/tuple gen/int)))]
     (search-range-test values query)))
 
 (deftest subkey-works
