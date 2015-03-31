@@ -1,80 +1,203 @@
 (ns datomic-compound-index.core
   (:require [clojure.string :as str]
             [clojure.data.fressian :as fress]
+            [clojure.set :as set]
             [datomic.api :as d])
   (:import java.util.Date
            datomic.db.Datum
-           java.util.regex.Pattern))
+           java.util.regex.Pattern
+           java.nio.ByteBuffer))
 
-;; approaches
-;; get encoding to work properly
+(defprotocol Serialize
+  (to-bytes [x]
+    "Given a value that can be stored in datomic, returns a byte array
+    representation of the value for use in a compound-index. to-bytes
+    should be designed such that for two values x,y, if (< x y)
+    then (< (to-bytes x) (to-bytes y))"))
 
-(defprotocol SerializeKey
-  (to-bytes [this])
-  (from-bytes [this]))
+(defn pad-str-bytes [str len]
+  (let [bytes (.getBytes str)
+        byte-len (min (count bytes) len)
+        bb (ByteBuffer/allocate len)
+        pad-len (- len (count bytes))]
+    (.put bb bytes 0 byte-len)
+    (.put bb (into-array Byte/TYPE (take pad-len (repeat (byte 0)))))
+    (.array bb)))
 
-(extend-protocol SerializeKey
+(def classmap {Long 0
+               String 1
+               clojure.lang.Keyword 2
+               java.util.Date 3})
+
+(extend-protocol Serialize
+  String
+  (to-bytes [x]
+    (pad-str-bytes x 255)
+    ;; (.getBytes x)
+    )
+  java.util.Date
+  (to-bytes [x]
+    (to-bytes (.getTime x)))
   java.lang.Long
   (to-bytes [x]
-    (* -1 x))
-  (from-bytes [x]
-    (* -1 x)))
+    (-> (ByteBuffer/allocate 8)
+        (.putLong (+ x (bit-shift-left 1 62)))
+        (.array))))
 
-(defn serialize-key []
-  ()
-  )
+(defn serialize [x]
+  (let [bytes (to-bytes x)]
+    {:data bytes
+     :metadata {:type (classmap (class x))
+                :len (count bytes)}}))
 
-(defn deserialize-key [])
+(defn concat-bytes [arrs]
+  (let [len (reduce + (map count arrs))
+        bb (ByteBuffer/allocate len)]
+    (doseq [a arrs]
+      (.put bb a))
+    (.array bb)))
+
+(defn conj-metas [metas]
+  (->
+   (reduce (fn [state meta]
+             (let [{:keys [pos]} state
+                   {:keys [len]} meta]
+               (assert pos)
+               (assert len)
+               (-> state
+                   (update-in [:return] (fnil conj []) (assoc meta :pos [pos (+ pos len)]))
+                   (update-in [:pos] + len)))) {:pos 0
+                                                :ret []} metas)
+   :return))
+
 (defn index-key
-  "Create an index key. Can be used for inserting, or querying.
+  "Create an index key. Can be used for querying. For inserting, see insert-index-key
 
   key is a vector of datomic values"
-  [key]
-  (.array (fress/write (to-bytes key))))
+  [args]
+  (let [s (map serialize args)]
+    {:data (concat-bytes (map :data s))
+     :metadata (conj-metas (map :metadata s))}))
 
-(defn compound-compare
-  "compare operation. If the key is shorter than value, and all previous sub-keys match, returns 0"
-  [ak bk]
-  (loop [[a & as] ak
-         [b & bs] bk]
-    (if (or (nil? a)
-            (nil? b))
-      0
-      (let [result (compare a b)]
-        (if (= 0 result)
-          (recur as bs)
-          result)))))
+(defn attr-meta-col-name [attr]
+  (keyword (namespace attr) (str (name attr) "-metadata")))
+
+(defn insert-index-key
+  "Returns a map of data to transact. Returned data is missing a :db/id, so merge it into the entity map when transacting. i.e.
+
+  (d/transact conn [(merge {:db/id id, :user/foo x, :user/bar y} (insert-index-key :user/foo-bar [x y]))])
+
+  Arguments:
+
+  attr - the compound index attribute. Should be indexed, of type :bytes. A second attribute named <attr>-metadata should also exist, of type :bytes, but not indexed.
+  args - a vector of values"
+  [attr args]
+  (let [{:keys [data metadata]} (index-key args)]
+    {attr data
+     (attr-meta-col-name attr) (-> (fress/write metadata) (.array))}))
+
+(defn key-compare
+  [a b]
+  (let [{adata :data ametas :metadata} a
+        {bdata :data bmetas :metadata} b
+        alast (count adata)
+        blast (count adata)]
+    (loop [pos 0
+           ameta (-> ametas first)
+           bmeta (-> bmetas first)]
+      (cond
+        (= pos alast blast) 0
+        (= pos alast) -1
+        (= pos blast) 1
+        :else
+        (let [abyte (aget adata pos)
+              bbyte (aget bdata pos)
+              astop (-> ameta :pos second)
+              bstop (-> bmeta :pos second)]
+          (cond
+            (= pos astop bstop) (recur (inc pos) (rest ametas) (rest bmetas))
+            (= pos astop) -1
+            (= pos bstop) 1
+            (< abyte bbyte) -1
+            (> abyte bbyte) 1
+            (= abyte bbyte) (recur (inc pos) ametas bmetas)
+            :else (assert false)))))))
+
+(defn subkey=
+  "True if a is a subkey of b, meaning a has fewer segments, and every segment of a is in b"
+  [a b]
+  (let [{adata :data ametas :metadata} a
+        {bdata :data bmetas :metadata} b
+        alast (count adata)
+        blast (count adata)]
+    (assert ametas)
+    (assert bmetas)
+    (loop [pos 0
+           ameta (-> ametas first)
+           bmeta (-> bmetas first)]
+      (cond
+        (= pos alast blast) true
+        (= pos alast) true
+        (= pos blast) false
+        :else
+        (let [abyte (aget adata pos)
+              bbyte (aget bdata pos)
+              astop (-> ameta :pos second)
+              bstop (-> bmeta :pos second)]
+          (cond
+            (= pos astop bstop) (recur (inc pos) (rest ametas) (rest bmetas))
+            (= pos astop) false
+            (= pos bstop) false
+            (< abyte bbyte) false
+            (> abyte bbyte) false
+            (= abyte bbyte) (recur (inc pos) ametas bmetas)
+            :else (assert false)))))))
+
+(defn deserialize!
+  "Given an eid and the a compound-indexed attr, return the deserialized value"
+  [db e attr]
+  (let [meta-col (attr-meta-col-name attr)
+        k (d/pull db [attr meta-col] e)]
+    {:data (get k attr)
+     :metadata (fress/read (get k meta-col))}))
 
 (defn search
-  "Search a compound index. attr is the attribute to search. Returns a seq of datoms. key, key1,key2 are vectors that will be passed to index-key.
+  "Search a compound index. attr is the attribute to search. Returns a seq of datoms. key is a vectors that will be passed to index-key.
 
-   Passing a single key returns all datoms , two keys uses d/index-range.
-
-   (search db :event/user-at-type [1234 (Date.) {:partial? true}])
+   (search db :event/user-at-type [1234 (Date.)])
  "
   ([db attr key]
-   (let [attr-id (:id (d/attribute db attr))]
+   (let [key (index-key key)
+         attr-id (:id (d/attribute db attr))]
      (->> (d/seek-datoms db :avet attr key)
-          (mapv identity)
-          (seq)
           (drop-while (fn [^Datum d]
-                        (and (= attr-id (.a d))
-                             (< (compound-compare (fress/read (.v d)) key) 0))))
+                        (let [vkey (deserialize! db (.e d) attr)]
+                          (and (not (subkey= key vkey))
+                               (< (key-compare vkey key) 0)))))
           (take-while (fn [^Datum d]
                         (and (= attr-id (.a d))
-                             (= (compound-compare (fress/read (.v d)) key) 0))))))))
+                             (subkey= key (deserialize! db (.e d) attr)) 0)))
+          (seq)))))
 
 (defn search-range
   "Search a compound index. Returns a seq of datoms.
 
   Uses d/index-range to find all datoms between key1 and key2, inclusive"
   [db attr key1 key2]
-  (let [attr-id (:id (d/attribute db attr))]
+  (let [key1 (index-key key1)
+        key2 (index-key key2)
+        attr-id (:id (d/attribute db attr))]
     (->> (d/seek-datoms db :avet attr key1)
-         (seq)
          (drop-while (fn [^Datum d]
-                       (and (= attr-id (.a d))
-                            (< (compound-compare (fress/read (.v d)) key1) 0))))
+                       (let [vkey (deserialize! db (.e d) attr)]
+                         (and (not (subkey= key1 vkey))
+                              (< (key-compare vkey key1) 0)))))
          (take-while (fn [^Datum d]
-                       (and (= attr-id (.a d))
-                            (<= (compound-compare (fress/read (.v d)) key2) 0)))))))
+                       (let [vkey (deserialize! db (.e d) attr)]
+                         (and (= attr-id (.a d))
+                              (or (subkey= key2 vkey)
+                                  (subkey= key1 vkey)
+                                  (and
+                                   (> (key-compare vkey key1) 0)
+                                   (< (key-compare vkey key2) 0)))))))
+         (seq))))

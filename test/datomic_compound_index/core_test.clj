@@ -1,6 +1,5 @@
 (ns datomic-compound-index.core-test
-  (:require [clojure.data.fressian :as fress]
-            [clojure.test :refer :all]
+  (:require [clojure.test :refer :all]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -25,93 +24,151 @@
     (d/create-database db-url)
     (d/connect db-url)))
 
-(deftest index-key-uses-to-datomic-for-dates
-  (let [v (index-key [(Date.) 1234])]
-    (is (string? v))
-    (is (re-find #"^[0-9|]+$" v))))
+(def gen-date (gen/fmap (fn [i] (Date. (long (* i 1003 1007 1001 1002)))) gen/int))
 
-(deftest index-key-works
-  (is (index-key [1 :foo])))
+(def gen-supported-values (gen/one-of [gen/int ;; gen/boolean gen/string gen/keyword gen-date
+                                       ]))
+
+(def int-schema [(attribute :user/foo :db.type/long)
+                 (attribute :user/bar :db.type/long)
+                 (attribute :user/foo-bar :db.type/bytes
+                            :db/index true)
+                 (attribute :user/foo-bar-metadata :db.type/bytes)])
+(defspec index-key-works
+  100
+  (prop/for-all [v gen-supported-values]
+    (let [resp (index-key [v])]
+      (and resp
+           (:data resp)
+           (seq (:metadata resp))))))
+
+(defn <order-test
+  "Returns true if x is < y, in datomic"
+  [x y]
+  (let [conn (empty-database)]
+    @(d/transact conn int-schema)
+    @(d/transact conn [(merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 1}
+                        (insert-index-key :user/foo-bar x))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 2}
+                        (insert-index-key :user/foo-bar y))])
+    (->> (seq (d/seek-datoms (d/db conn) :avet :user/foo-bar))
+         (map (fn [datum]
+                (d/pull (d/db conn) [:user/foo] (.e datum))))
+         (mapv :user/foo)
+         (apply <))))
+
+(deftest ordering-tests
+  (are [x y] (and (= true (<order-test x y))
+                  (<= (key-compare (index-key x) (index-key y)) 0))
+       [] [0]
+       [0] [1]
+       [-1] [1]
+       [0 0] [1 0]
+       [0 1] [1 0]
+       [0 "foo"] [1 "bar"]
+       ["aaaa" 1] ["z" 0]
+       [1] [1 2]
+       [1 2] [1 2 "foo"]
+       [1] [11]
+       [1 "z"] [11 "a"]))
+
+(defn search-vector [db eid]
+  ((juxt :user/foo :user/bar) (d/pull db [:user/foo :user/bar] eid)))
 
 (deftest search-finds-things-correctly
-  (let [schema [(attribute :user/foo-bar :db.type/bytes
-                           :db/index true)]
+  (let [schema [(attribute :user/foo :db.type/string
+                           :db/index true)
+                (attribute :user/foo-bar :db.type/bytes
+                           :db/index true)
+                (attribute :user/foo-bar-metadata :db.type/bytes)]
         conn (empty-database)]
     @(d/transact conn schema)
-    @(d/transact conn [{:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [1 "foo"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [1 "bar"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [11 "bbq"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [2 "baz"])}])
+    @(d/transact conn [(merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo "1|foo"}
+                        (insert-index-key :user/foo-bar [1 "foo"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo "1|bar"}
+                        (insert-index-key :user/foo-bar [1 "bar"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo "11|bbq"}
+                        (insert-index-key :user/foo-bar [11 "bbq"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo "2|baz"}
+                        (insert-index-key :user/foo-bar [2 "baz"]))])
     (is (= 2 (count (search (d/db conn) :user/foo-bar [1]))))
     (is (= 1 (count (search (d/db conn) :user/foo-bar [1 "bar"]))))
     (is (= 0 (count (search (d/db conn) :user/foo-bar [1 "bogus"]))))))
 
 (deftest search-range-finds-things-correctly
-  (let [schema [(attribute :user/foo-bar :db.type/bytes
-                           :db/index true)]
+  (let [schema [(attribute :user/foo :db.type/long
+                           :db/index true)
+                (attribute :user/bar :db.type/string
+                           :db/index true)
+                (attribute :user/foo-bar :db.type/bytes
+                           :db/index true)
+                (attribute :user/foo-bar-metadata :db.type/bytes)]
         conn (empty-database)]
     @(d/transact conn schema)
-    @(d/transact conn [{:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [1 "foo"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [2 "bar"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [3 "bbq"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [4 "baz"])}
-                       {:db/id (d/tempid :db.part/user)
-                        :user/foo-bar (index-key [5 "quux"])}])
-    (let [result (search-range (d/db conn) :user/foo-bar [2] [4])]
-      (is (= [[2 "bar"] [3 "bbq"] [4 "baz"]] (map (fn [^Datum d] (fress/read (.v d))) result))))
+    @(d/transact conn [(merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 1
+                         :user/bar "foo"}
+                        (insert-index-key :user/foo-bar [1 "foo"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 2
+                         :user/bar "bar"}
+                        (insert-index-key :user/foo-bar [2 "bar"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 3
+                         :user/bar "bbq"}
+                        (insert-index-key :user/foo-bar [3 "bbq"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 4
+                         :user/bar "baz"}
+                        (insert-index-key :user/foo-bar [4 "baz"]))
+                       (merge
+                        {:db/id (d/tempid :db.part/user)
+                         :user/foo 5
+                         :user/bar "quux"}
+                        (insert-index-key :user/foo-bar [5 "quux"]))])
+    (let [db (d/db conn)
+          ->vector-result (fn [datum]
+                            ((juxt :user/foo :user/bar) (d/pull db [:user/foo :user/bar] (.e datum))))]
+      (let [result (search-range (d/db conn) :user/foo-bar [2] [4])]
+        (is (= [[2 "bar"] [3 "bbq"] [4 "baz"]] (map ->vector-result result))))
 
-    (let [result (search-range (d/db conn) :user/foo-bar [2 "bar"] [4 "baz"])]
-      (is (= [[2 "bar"] [3 "bbq"] [4 "baz"]] (map (fn [^Datum d] (fress/read (.v d))) result))))))
-
-
-(deftest compound-compare-works
-  (are [a b op v] (op (compound-compare a b) v)
-       [0] [0] = 0
-       [0] [1] < 0
-       [-4] [-2] < 0
-       [-4] [2] < 0
-       [0 0] [1 1] < 0
-       [-1 0] [0 0] < 0))
-
-(defn normalize-compare
-  "Returns -1, 0,1 to make testing easier"
-  [c]
-  (cond
-    (> c 0) 1
-    (< c 0) -1
-    :else 0))
-
-(defspec index-key-preserves-order
-  (prop/for-all [[a b] (gen/tuple gen/int gen/int)]
-    (= (normalize-compare (compare a b)) (normalize-compare (compound-compare (index-key a) (index-key b))))))
-
-(defn search-vector [db eid]
-  ((juxt :user/foo :user/bar) (d/pull db [:user/foo :user/bar] eid)))
+      (let [result (search-range (d/db conn) :user/foo-bar [2 "bar"] [4 "baz"])]
+        (is (= [[2 "bar"] [3 "bbq"] [4 "baz"]] (map ->vector-result result)))))))
 
 ;; search-spec TODO
 ;; - make query separate from values
 (defspec search-spec
   100
-  (let [conn (empty-database)
-        schema [(attribute :user/foo :db.type/long)
-                (attribute :user/bar :db.type/long)
-                (attribute :user/foo-bar :db.type/bytes
-                           :db/index true)]]
-    @(d/transact conn schema)
-    (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))]
+  (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))]
+    (let [conn (empty-database)
+          schema [(attribute :user/foo :db.type/long)
+                  (attribute :user/bar :db.type/long)
+                  (attribute :user/foo-bar :db.type/bytes
+                             :db/index true)
+                  (attribute :user/foo-bar-metadata :db.type/bytes)]]
+      @(d/transact conn schema)
       @(d/transact conn (for [[foo bar] values]
-                          {:db/id (d/tempid :db.part/user)
-                           :user/foo foo
-                           :user/bar bar
-                           :user/foo-bar (index-key [foo bar])}))
+                          (merge
+                           {:db/id (d/tempid :db.part/user)
+                            :user/foo foo
+                            :user/bar bar}
+                           (insert-index-key :user/foo-bar [foo bar]))))
       (let [db (d/db conn)]
         (every? (fn [[foo bar]]
                   (let [datomic (->> (d/q '[:find [?e ...] :in $ ?foo ?bar :where
@@ -123,22 +180,22 @@
                                                    (.e datom)))
                                            (sort))
                         eql? (= datomic search-result)]
-                    (when-not eql?
-                      (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
-                            datomic (->>
-                                     (d/q '[:find [?e ...] :in $ ?foo ?bar :where
-                                            [?e :user/foo ?foo]
-                                            [?e :user/bar ?bar]] db foo bar)
-                                     (mapv (fn [eid]
-                                             (search-vector db eid))))
-                            search-result (->>
-                                           (search db :user/foo-bar [foo bar])
-                                           (mapv (fn [datom]
-                                                   (search-vector db (.e datom)))))]
-                        (inspect values)
-                        (inspect [foo bar])
-                        (inspect datomic)
-                        (inspect search-result)))
+                    ;; (when-not eql?
+                    ;;   (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
+                    ;;         datomic (->>
+                    ;;                  (d/q '[:find [?e ...] :in $ ?foo ?bar :where
+                    ;;                         [?e :user/foo ?foo]
+                    ;;                         [?e :user/bar ?bar]] db foo bar)
+                    ;;                  (mapv (fn [eid]
+                    ;;                          (search-vector db eid))))
+                    ;;         search-result (->>
+                    ;;                        (search db :user/foo-bar [foo bar])
+                    ;;                        (mapv (fn [datom]
+                    ;;                                (search-vector db (.e datom)))))]
+                    ;;     (inspect values)
+                    ;;     (inspect [foo bar])
+                    ;;     (inspect datomic)
+                    ;;     (inspect search-result)))
                     eql?)) values)))))
 
 (defn search-test
@@ -148,69 +205,80 @@
         schema [(attribute :user/foo :db.type/long)
                 (attribute :user/bar :db.type/long)
                 (attribute :user/foo-bar :db.type/bytes
-                           :db/index true)]]
+                           :db/index true)
+                (attribute :user/foo-bar-metadata :db.type/bytes)]]
     @(d/transact conn schema)
     @(d/transact conn (for [[foo bar] values]
-                        {:db/id (d/tempid :db.part/user)
-                         :user/foo foo
-                         :user/bar bar
-                         :user/foo-bar (index-key [foo bar])}))
+                        (merge
+                         {:db/id (d/tempid :db.part/user)
+                          :user/foo foo
+                          :user/bar bar}
+                         (insert-index-key :user/foo-bar [foo bar]))))
     (let [datoms (search (d/db conn) :user/foo-bar query)
           result (set (map (fn [d]
                              ((juxt :user/foo :user/bar) (d/pull (d/db conn) [:user/foo :user/bar] (.e d)))) datoms))]
       (is (= expected result)))))
 
 (deftest search-tests
-  ;; (search-test [] [] #{})
-  ;; (search-test [[0 0]] [0 0] #{[0 0]})
-  ;; (search-test [[1 -1] [1 0]] [1 0] #{[1 0]})
+  (search-test [] [] #{})
+  (search-test [[0 0]] [0 0] #{[0 0]})
+  (search-test [[1 -1] [1 0]] [1 0] #{[1 0]})
 
-  (search-test [[2 4] [-4 -2] [2 -4]] [-4 -2] #{[-4 -2]})
-  )
+  (search-test [[2 4] [-4 -2] [2 -4]] [-4 -2] #{[-4 -2]}))
 
 (defspec search-range-spec
   100
-  (let [conn (empty-database)
-        schema [(attribute :user/foo :db.type/long)
-                (attribute :user/bar :db.type/long)
-                (attribute :user/foo-bar :db.type/bytes
-                           :db/index true)]]
-    @(d/transact conn schema)
-    (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))
-                   query (gen/such-that (fn [[[f1 b1] [f2 b2]]]
-                                          (< f1 f2)) (gen/tuple (gen/tuple gen/pos-int gen/pos-int) (gen/tuple gen/pos-int gen/pos-int)))]
+  (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))
+                 query (gen/fmap (fn [[[foo1 bar1] [foo2 bar2]]]
+                                   (if (> foo1 foo2)
+                                     [[foo2 bar2] [foo1 bar1]]
+                                     [[foo1 bar1] [foo2 bar2]])) (gen/tuple (gen/tuple gen/pos-int gen/pos-int) (gen/tuple gen/pos-int gen/pos-int)))]
+    (let [conn (empty-database)
+          schema [(attribute :user/foo :db.type/long)
+                  (attribute :user/bar :db.type/long)
+                  (attribute :user/foo-bar :db.type/bytes
+                             :db/index true)
+                  (attribute :user/foo-bar-metadata :db.type/bytes)]]
+      @(d/transact conn schema)
       @(d/transact conn (for [[foo bar] values]
-                          {:db/id (d/tempid :db.part/user)
-                           :user/foo foo
-                           :user/bar bar
-                           :user/foo-bar (index-key [foo bar])}))
+                          (merge
+                           {:db/id (d/tempid :db.part/user)
+                            :user/foo foo
+                            :user/bar bar}
+                           (insert-index-key :user/foo-bar [foo bar]))))
       (let [db (d/db conn)]
         (let [[[foo1 bar1] [foo2 bar2]] query
-              datomic (->> (d/q '[:find [?e ...] :in $ ?foo1 ?foo2 ?bar1 ?bar2 :where
+              datomic (->> (d/q '[:find [?e ...] :in $ ?foo1 ?bar1 ?foo2 ?bar2  :where
                                   [?e :user/foo ?efoo]
                                   [?e :user/bar ?ebar]
-                                  [(<= ?foo1 ?efoo)]
-                                  [(<= ?efoo ?foo2)]
-                                  [(<= ?bar1 ?ebar)]
-                                  [(<= ?ebar ?bar2)]] db foo1 foo2 bar1 bar2)
+                                  (or
+                                   (and [(< ?foo1 ?efoo)]
+                                        [(identity ?bar1)]
+                                        [(identity ?ebar)])
+                                   (and [(= ?foo1 ?efoo)]
+                                        [(<= ?bar1 ?ebar)]))
+                                  (or
+                                   (and [(< ?efoo ?foo2)]
+                                        [(identity ?bar2)]
+                                        [(identity ?ebar)])
+                                   (and [(= ?efoo ?foo2)]
+                                        [(<= ?ebar ?bar2)]))]
+                                  db foo1 bar1 foo2 bar2)
                            (sort))
               search-result (->> (search-range db :user/foo-bar [foo1 bar1] [foo2 bar2])
                                  (mapv (fn [^Datum datom]
                                          (.e datom)))
                                  (sort))
               eql? (= datomic search-result)]
-          (when-not eql?
-            (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
-                  all-values (mapv #(search-vector (d/db conn) %) all-values)
-                  datomic-result (vec (map #(search-vector (d/db conn) %) datomic))
-                  search-result (vec (map #(search-vector (d/db conn) %) search-result))]
-              (inspect all-values)
-              (inspect query)
-              (inspect datomic-result)
-              (inspect search-result)
-              ;; (inspect datomic)
-              ;; (inspect search-result)
-              ))
+          ;; (when-not eql?
+          ;;   (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
+          ;;         all-values (mapv #(search-vector (d/db conn) %) all-values)
+          ;;         datomic-result (vec (map #(search-vector (d/db conn) %) datomic))
+          ;;         search-result (vec (map #(search-vector (d/db conn) %) search-result))]
+          ;;     (inspect all-values)
+          ;;     (inspect query)
+          ;;     (inspect datomic-result)
+          ;;     (inspect search-result)))
           eql?)))))
 
 (defn search-range-test
@@ -220,19 +288,26 @@
         schema [(attribute :user/foo :db.type/long)
                 (attribute :user/bar :db.type/long)
                 (attribute :user/foo-bar :db.type/bytes
-                           :db/index true)]]
+                           :db/index true)
+                (attribute :user/foo-bar-metadata :db.type/bytes)]]
     @(d/transact conn schema)
     @(d/transact conn (for [[foo bar] values]
-                        {:db/id (d/tempid :db.part/user)
-                         :user/foo foo
-                         :user/bar bar
-                         :user/foo-bar (index-key [foo bar])}))
+                        (merge
+                         {:db/id (d/tempid :db.part/user)
+                          :user/foo foo
+                          :user/bar bar}
+                         (insert-index-key :user/foo-bar [foo bar]))))
     (let [datoms (apply search-range (d/db conn) :user/foo-bar query)
           result (set (map (fn [d]
                              ((juxt :user/foo :user/bar) (d/pull (d/db conn) [:user/foo :user/bar] (.e d)))) datoms))]
       (is (= expected result)))))
 
-(deftest search-range-1
+(deftest subkey-works
+  (are [x y result] (= result (subkey= (index-key x) (index-key y)))
+       [0] [0 0] true
+       [0 1] [0 2] false))
+
+(deftest search-range-tests
   (search-range-test [[0 1]] [[0 0] [0 2]] #{[0 1]})
   (search-range-test [[0 0]] [[0 1] [0 2]] #{})
   (search-range-test [[-1 1]] [[2 0] [3 0]] #{})
