@@ -1,3 +1,0 @@
-machine:
-  environment:
-    JVM_OPTS: "-Xmx2048m"
