@@ -152,7 +152,11 @@
         (is (= [[2 "bar"] [3 "bbq"] [4 "baz"]] (map ->vector-result result)))))))
 
 (defn search-test
-  "Values is a seq of [foo bar] pairs. Query is a vector [foo bar] result is a set of vectors [foo bar]"
+  "Values is a seq of [foo bar] pairs. Query is a vector [foo
+  bar]. Asserts the search result and datomic query results are the
+  same. When optionally passed expected, a set of vectors, asserts
+  that both results also equal expected."
+
   [values query & [expected]]
   (let [conn (empty-database)
         schema [(attribute :user/foo :db.type/long)
@@ -203,6 +207,12 @@
                  query (gen/tuple gen/int gen/int)]
     (search-test values query)))
 
+(defspec search-partial-spec
+  100
+  (prop/for-all [values (gen/vector (gen/tuple gen/int gen/int))
+                 query (gen/tuple gen/int)]
+    (search-test values query)))
+
 (deftest search-tests
   (search-test [] [] #{})
   (search-test [[0 0]] [0 0] #{[0 0]})
@@ -210,64 +220,9 @@
 
   (search-test [[2 4] [-4 -2] [2 -4]] [-4 -2] #{[-4 -2]}))
 
-(defspec search-range-spec
-  100
-  (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))
-                 query (gen/fmap (fn [[[foo1 bar1] [foo2 bar2]]]
-                                   (if (> foo1 foo2)
-                                     [[foo2 bar2] [foo1 bar1]]
-                                     [[foo1 bar1] [foo2 bar2]])) (gen/tuple (gen/tuple gen/pos-int gen/pos-int) (gen/tuple gen/pos-int gen/pos-int)))]
-    (let [conn (empty-database)
-          schema [(attribute :user/foo :db.type/long)
-                  (attribute :user/bar :db.type/long)
-                  (attribute :user/foo-bar :db.type/bytes
-                             :db/index true)
-                  (attribute :user/foo-bar-metadata :db.type/bytes)]]
-      @(d/transact conn schema)
-      @(d/transact conn (for [[foo bar] values]
-                          (merge
-                           {:db/id (d/tempid :db.part/user)
-                            :user/foo foo
-                            :user/bar bar}
-                           (insert-index-key :user/foo-bar [foo bar]))))
-      (let [db (d/db conn)]
-        (let [[[foo1 bar1] [foo2 bar2]] query
-              datomic (->> (d/q '[:find [?e ...] :in $ ?foo1 ?bar1 ?foo2 ?bar2  :where
-                                  [?e :user/foo ?efoo]
-                                  [?e :user/bar ?ebar]
-                                  (or
-                                   (and [(< ?foo1 ?efoo)]
-                                        [(identity ?bar1)]
-                                        [(identity ?ebar)])
-                                   (and [(= ?foo1 ?efoo)]
-                                        [(<= ?bar1 ?ebar)]))
-                                  (or
-                                   (and [(< ?efoo ?foo2)]
-                                        [(identity ?bar2)]
-                                        [(identity ?ebar)])
-                                   (and [(= ?efoo ?foo2)]
-                                        [(<= ?ebar ?bar2)]))]
-                                  db foo1 bar1 foo2 bar2)
-                           (sort))
-              search-result (->> (search-range db :user/foo-bar [foo1 bar1] [foo2 bar2])
-                                 (mapv (fn [^Datum datom]
-                                         (.e datom)))
-                                 (sort))
-              eql? (= datomic search-result)]
-          (when-not eql?
-            (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
-                  all-values (mapv #(search-vector (d/db conn) %) all-values)
-                  datomic-result (vec (map #(search-vector (d/db conn) %) datomic))
-                  search-result (vec (map #(search-vector (d/db conn) %) search-result))]
-              (println "all-values:" all-values)
-              (println "query:" query)
-              (println "datomic-result:" datomic-result)
-              (println "search-result" search-result)))
-          eql?)))))
-
 (defn search-range-test
   "Values is a seq of [foo bar] pairs. Query is a vector [[foo bar] [foo bar]] result is a set of vectors [foo bar]"
-  [values query expected]
+  [values query & [expected]]
   (let [conn (empty-database)
         schema [(attribute :user/foo :db.type/long)
                 (attribute :user/bar :db.type/long)
@@ -281,10 +236,52 @@
                           :user/foo foo
                           :user/bar bar}
                          (insert-index-key :user/foo-bar [foo bar]))))
-    (let [datoms (apply search-range (d/db conn) :user/foo-bar query)
-          result (set (map (fn [d]
-                             ((juxt :user/foo :user/bar) (d/pull (d/db conn) [:user/foo :user/bar] (.e d)))) datoms))]
-      (is (= expected result)))))
+    (let [db (d/db conn)
+          [[foo1 bar1] [foo2 bar2]] query
+          datomic-result (->> (d/q '[:find [?e ...] :in $ ?foo1 ?bar1 ?foo2 ?bar2  :where
+                                     [?e :user/foo ?efoo]
+                                     [?e :user/bar ?ebar]
+                                     (or
+                                      (and [(< ?foo1 ?efoo)]
+                                           [(identity ?bar1)]
+                                           [(identity ?ebar)])
+                                      (and [(= ?foo1 ?efoo)]
+                                           [(<= ?bar1 ?ebar)]))
+                                     (or
+                                      (and [(< ?efoo ?foo2)]
+                                           [(identity ?bar2)]
+                                           [(identity ?ebar)])
+                                      (and [(= ?efoo ?foo2)]
+                                           [(<= ?ebar ?bar2)]))]
+                                   db foo1 bar1 foo2 bar2)
+                              (map #(search-vector db %))
+                              set)
+          search-result (->> (apply search-range db :user/foo-bar query)
+                             (map #(search-vector db (.e %)))
+                             (set))
+          expected? (if expected
+                      (= expected search-result)
+                      true)
+          eql? (= search-result datomic-result)]
+      (when-not eql?
+        (let [all-values (d/q '[:find [?e ...] :in $ :where [?e :user/foo]] (d/db conn))
+              all-values (mapv #(search-vector (d/db conn) %) all-values)]
+          (println "all-values:" all-values)
+          (println "query:" query)
+          (println "datomic-result:" datomic-result)
+          (println "search-result" search-result)))
+      (is expected?)
+      (is eql?)
+      (and eql? expected?))))
+
+(defspec search-range-spec
+  100
+  (prop/for-all [values (gen/vector (gen/tuple gen/pos-int gen/pos-int))
+                 query (gen/fmap (fn [[[foo1 bar1] [foo2 bar2]]]
+                                   (if (> foo1 foo2)
+                                     [[foo2 bar2] [foo1 bar1]]
+                                     [[foo1 bar1] [foo2 bar2]])) (gen/tuple (gen/tuple gen/pos-int gen/pos-int) (gen/tuple gen/pos-int gen/pos-int)))]
+    (search-range-test values query)))
 
 (deftest subkey-works
   (are [x y result] (= result (subkey= (index-key x) (index-key y)))
