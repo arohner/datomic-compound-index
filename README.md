@@ -87,7 +87,7 @@ of type bytes with the same name, with the suffix "-metadata". If the
 indexed attribute is named ":user/foo", the second attribute would be
 named ":user/foo-metadata". In a comment/docstring, specify the type
 and order of values that will be indexed. Every entity must use values
-of the same type.
+of the same type, in the same order.
 
 When inserting new entities,
 use insert-index-key to create the value for the compound-indexed attribute:
@@ -145,9 +145,9 @@ efficient.
 
 # Limitations
 
-- DCI stores attributes as *fixed width*. This is 8 bytes for longs, and 255 bytes for strings. Since String storage is expensive, it's recommended that you intern strings in another entity, and store the DBId instead, when possible.
+- DCI stores attributes as *fixed width* byte arrays. This is 8 bytes for longs, and 255 bytes for strings. Since String storage is expensive, it's recommended that you intern strings in another entity, and store the DBId instead, when possible.
 - index-key does not automatically update the compound index attribute when any of 'source' attributes change.
-- Using d/q with a partial index-key won't work because d/q doesn't support substring matches.
+- Using d/q with a partial index-key won't work.
 - keys are sorted & searched via string representation, lexographically.
 - datomic supports using re-find in a database function, but AFAICT, there's no way for it to use an index, so avoid re-find.
 

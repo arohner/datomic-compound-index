@@ -32,9 +32,7 @@
 (extend-protocol Serialize
   String
   (to-bytes [x]
-    (pad-str-bytes x 255)
-    ;; (.getBytes x)
-    )
+    (pad-str-bytes x 255))
   java.util.Date
   (to-bytes [x]
     (to-bytes (.getTime x)))
