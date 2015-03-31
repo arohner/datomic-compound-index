@@ -15,13 +15,13 @@
     should be designed such that for two values x,y, if (< x y)
     then (< (to-bytes x) (to-bytes y))"))
 
-(defn pad-str-bytes [str len]
+(defn pad-str-bytes [^String str len]
   (let [bytes (.getBytes str)
         byte-len (min (count bytes) len)
         bb (ByteBuffer/allocate len)
         pad-len (- len (count bytes))]
     (.put bb bytes 0 byte-len)
-    (.put bb (into-array Byte/TYPE (take pad-len (repeat (byte 0)))))
+    (.put bb ^bytes (into-array Byte/TYPE (take pad-len (repeat (byte 0)))))
     (.array bb)))
 
 (def classmap {Long 0
@@ -54,7 +54,7 @@
   (let [len (reduce + (map count arrs))
         bb (ByteBuffer/allocate len)]
     (doseq [a arrs]
-      (.put bb a))
+      (.put bb ^bytes a))
     (.array bb)))
 
 (defn conj-metas [metas]
@@ -97,21 +97,24 @@
      (attr-meta-col-name attr) (-> (fress/write metadata) (.array))}))
 
 (defn key-compare
+  "Compare two keys. Behaves like clojure.core/compare, returning -1,0,1, but also returns :subkey-a when a is a subkey of b, and :subkey-b when b is a subkey of a"
   [a b]
   (let [{adata :data ametas :metadata} a
         {bdata :data bmetas :metadata} b
         alast (count adata)
-        blast (count adata)]
+        blast (count bdata)]
+    (assert adata)
+    (assert bdata)
     (loop [pos 0
            ameta (-> ametas first)
            bmeta (-> bmetas first)]
       (cond
         (= pos alast blast) 0
-        (= pos alast) -1
-        (= pos blast) 1
+        (= pos alast) :subkey-a
+        (= pos blast) :subkey-b
         :else
-        (let [abyte (aget adata pos)
-              bbyte (aget bdata pos)
+        (let [abyte (aget ^bytes adata pos)
+              bbyte (aget ^bytes bdata pos)
               astop (-> ameta :pos second)
               bstop (-> bmeta :pos second)]
           (cond
@@ -120,36 +123,6 @@
             (= pos bstop) 1
             (< abyte bbyte) -1
             (> abyte bbyte) 1
-            (= abyte bbyte) (recur (inc pos) ametas bmetas)
-            :else (assert false)))))))
-
-(defn subkey=
-  "True if a is a subkey of b, meaning a has fewer segments, and every segment of a is in b"
-  [a b]
-  (let [{adata :data ametas :metadata} a
-        {bdata :data bmetas :metadata} b
-        alast (count adata)
-        blast (count adata)]
-    (assert ametas)
-    (assert bmetas)
-    (loop [pos 0
-           ameta (-> ametas first)
-           bmeta (-> bmetas first)]
-      (cond
-        (= pos alast blast) true
-        (= pos alast) true
-        (= pos blast) false
-        :else
-        (let [abyte (aget adata pos)
-              bbyte (aget bdata pos)
-              astop (-> ameta :pos second)
-              bstop (-> bmeta :pos second)]
-          (cond
-            (= pos astop bstop) (recur (inc pos) (rest ametas) (rest bmetas))
-            (= pos astop) false
-            (= pos bstop) false
-            (< abyte bbyte) false
-            (> abyte bbyte) false
             (= abyte bbyte) (recur (inc pos) ametas bmetas)
             :else (assert false)))))))
 
@@ -171,12 +144,15 @@
          attr-id (:id (d/attribute db attr))]
      (->> (d/seek-datoms db :avet attr key)
           (drop-while (fn [^Datum d]
-                        (let [vkey (deserialize! db (.e d) attr)]
-                          (and (not (subkey= key vkey))
-                               (< (key-compare vkey key) 0)))))
+                        (let [vkey (deserialize! db (.e d) attr)
+                              result (key-compare vkey key)]
+                          (and (not (= :subkey-b result))
+                               (< result 0)))))
           (take-while (fn [^Datum d]
-                        (and (= attr-id (.a d))
-                             (subkey= key (deserialize! db (.e d) attr)) 0)))
+                        (let [result (key-compare key (deserialize! db (.e d) attr))]
+                          (and (= attr-id (.a d))
+                               (or (= :subkey-a result)
+                                   (= 0 result))))))
           (seq)))))
 
 (defn search-range
@@ -189,15 +165,18 @@
         attr-id (:id (d/attribute db attr))]
     (->> (d/seek-datoms db :avet attr key1)
          (drop-while (fn [^Datum d]
-                       (let [vkey (deserialize! db (.e d) attr)]
-                         (and (not (subkey= key1 vkey))
-                              (< (key-compare vkey key1) 0)))))
+                       (let [vkey (deserialize! db (.e d) attr)
+                             result (key-compare vkey key1)]
+                         (and (not= :subkey-b result)
+                              (< result 0)))))
          (take-while (fn [^Datum d]
                        (let [vkey (deserialize! db (.e d) attr)]
                          (and (= attr-id (.a d))
-                              (or (subkey= key2 vkey)
-                                  (subkey= key1 vkey)
-                                  (and
-                                   (> (key-compare vkey key1) 0)
-                                   (< (key-compare vkey key2) 0)))))))
+                              (let [result1 (delay (key-compare key1 vkey))
+                                    result2 (delay (key-compare vkey key2))]
+                                (or (= :subkey-a @result1)
+                                    (= :subkey-b @result2)
+                                    (and
+                                     (<= @result1 0)
+                                     (<= @result2 0))))))))
          (seq))))

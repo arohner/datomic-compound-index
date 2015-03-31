@@ -34,6 +34,7 @@
                  (attribute :user/foo-bar :db.type/bytes
                             :db/index true)
                  (attribute :user/foo-bar-metadata :db.type/bytes)])
+
 (defspec index-key-works
   100
   (prop/for-all [v gen-supported-values]
@@ -42,9 +43,8 @@
            (:data resp)
            (seq (:metadata resp))))))
 
-(defn <order-test
-  "Returns true if x is < y, in datomic"
-  [x y]
+(defn ordering-test
+  [operator x y]
   (let [conn (empty-database)]
     @(d/transact conn int-schema)
     @(d/transact conn [(merge
@@ -56,25 +56,39 @@
                          :user/foo 2}
                         (insert-index-key :user/foo-bar y))])
     (->> (seq (d/seek-datoms (d/db conn) :avet :user/foo-bar))
-         (map (fn [datum]
+         (map (fn [^Datum datum]
                 (d/pull (d/db conn) [:user/foo] (.e datum))))
          (mapv :user/foo)
-         (apply <))))
+         (apply operator))))
+
+(deftest key-compare-tests
+  (are [x y expected] (= (key-compare (index-key x) (index-key y)) expected)
+       [0 0] [0 1] -1
+       [0 1] [0 1] 0
+       [0 2] [0 1] 1
+       [0] [0 0] :subkey-a
+       [0] [0 1] :subkey-a))
 
 (deftest ordering-tests
-  (are [x y] (and (= true (<order-test x y))
-                  (<= (key-compare (index-key x) (index-key y)) 0))
-       [] [0]
-       [0] [1]
-       [-1] [1]
-       [0 0] [1 0]
-       [0 1] [1 0]
-       [0 "foo"] [1 "bar"]
-       ["aaaa" 1] ["z" 0]
-       [1] [1 2]
-       [1 2] [1 2 "foo"]
-       [1] [11]
-       [1 "z"] [11 "a"]))
+  (are [x y expected] (and (= true (ordering-test < x y))
+                           (= (key-compare (index-key x) (index-key y))) expected)
+       [] [0] :subkey-a
+       [0] [1] -1
+       [-1] [1] -1
+       [0 0] [1 0] -1
+       [0 1] [1 0] -1
+       [0 1] [0 2] -1
+       [0 "foo"] [1 "bar"] -1
+       ["aaaa" 1] ["z" 0] -1
+       [1] [1 2] :subkey-a
+       [1 2] [1 2 "foo"] :subkey-a
+       [1] [11] -1
+       [1 "z"] [11 "a"] -1))
+
+(deftest ordering-tests->
+  (are [x y expected] (and (= true (ordering-test > x y))
+                           (= (key-compare (index-key x) (index-key y))) expected)
+       [0 2] [0 1] 1))
 
 (defn search-vector [db eid]
   ((juxt :user/foo :user/bar) (d/pull db [:user/foo :user/bar] eid)))
@@ -143,7 +157,7 @@
                          :user/bar "quux"}
                         (insert-index-key :user/foo-bar [5 "quux"]))])
     (let [db (d/db conn)
-          ->vector-result (fn [datum]
+          ->vector-result (fn [^Datum datum]
                             ((juxt :user/foo :user/bar) (d/pull db [:user/foo :user/bar] (.e datum))))]
       (let [result (search-range (d/db conn) :user/foo-bar [2] [4])]
         (is (= [[2 "bar"] [3 "bbq"] [4 "baz"]] (map ->vector-result result))))
@@ -185,7 +199,7 @@
                                   (search-vector db eid)))
                           (set))
           datoms (search (d/db conn) :user/foo-bar query)
-          search-result (set (map (fn [d]
+          search-result (set (map (fn [^Datum d]
                                     (search-vector db (.e d))) datoms))
           expected? (if expected
                       (= expected search-result)
@@ -265,7 +279,7 @@
                               (map #(search-vector db %))
                               set)
           search-result (->> (apply search-range db :user/foo-bar query)
-                             (map #(search-vector db (.e %)))
+                             (map (fn [^Datum d] (search-vector db (.e d))))
                              (set))
           expected? (if expected
                       (= expected search-result)
@@ -300,11 +314,6 @@
                                      [[foo1] [foo2]])) (gen/tuple (gen/tuple gen/int) (gen/tuple gen/int)))]
     (search-range-test values query)))
 
-(deftest subkey-works
-  (are [x y result] (= result (subkey= (index-key x) (index-key y)))
-       [0] [0 0] true
-       [0 1] [0 2] false))
-
 (deftest search-range-tests
   (search-range-test [[0 1]] [[0 0] [0 2]] #{[0 1]})
   (search-range-test [[0 0]] [[0 1] [0 2]] #{})
@@ -314,6 +323,3 @@
   (search-range-test [[0 0] [1 1] [2 2]] [[-2 -2] [-3 -3]] #{})
   (search-range-test [[0 0] [1 1] [2 2]] [[-1 -2] [-3 -3]] #{})
   (search-range-test [[-2 0] [1 2]] [[-4 0] [4 1]] #{[-2 0] [1 2]}))
-
-;; (defspec search-range-partial)
-;; (defspec search-partial)
