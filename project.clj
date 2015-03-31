@@ -7,4 +7,5 @@
   :profiles {:dev {:dependencies [[com.datomic/datomic-free "0.9.5130"]
                                   [org.clojure/data.fressian "0.2.0"]
                                   [org.clojure/test.check "0.5.9"]]}
-             :test {:jvm_opts ["-Xmx2048m"]}})
+             :test {:jvm_opts ["-Xmx2048m"]}}
+  :jvm_opts ["-Xmx2048m"])
