@@ -47,7 +47,7 @@ The solution is to use a compound-index, an indexed attribute that contains both
 
 Let's say the current time is `1426630517988` (epoch), and the user we're interested in is user-id `1234`. Then we store
 
-"1234|1426630517988|" in the attribute :event/user-at. Here we're assigning "|" as the separator character.
+"1234|1426630517988|" in the attribute :event/user-at. (In reality, dci uses byte-arrays rather than strings, but the principle is the same).
 
 ```clojure
 (d/transact conn [{:db/id (d/tempid :events)
@@ -82,17 +82,24 @@ dci provides functions for the use cases described
 above. dci/index-key is the main entry point, it creates the keys used
 for inserting and querying on compound indices.
 
-Create an indexed attribute, of type string. In a comment/docstring,
-specify the type and order of values that will be indexed. When
-inserting new entities, use index-key to create the value for the compound-indexed attribute:
+Create an indexed attribute, of type bytes. Create a second attribute
+of type bytes with the same name, with the suffix "-metadata". If the
+indexed attribute is named ":user/foo", the second attribute would be
+named ":user/foo-metadata". In a comment/docstring, specify the type
+and order of values that will be indexed. Every entity must use values
+of the same type.
+
+When inserting new entities,
+use insert-index-key to create the value for the compound-indexed attribute:
 
 ```clojure
 (let [event-at (Date.)
       user-id 1234
       event-type :foo]
-  (d/transact conn [{:db/id (d/tempid :eventss)
-                   :event/type event-type
-                   :event/user-at-type (dci/index-key [user-id event-at event-type])}]))
+  (d/transact conn [(merge
+                     {:db/id (d/tempid :eventss)
+                      :event/type event-type}
+                      (dci/insert-index-key :event/user-at-type [user-id event-at event-type]))]))
 ```
 
 ## Query
@@ -102,7 +109,7 @@ inserting new entities, use index-key to create the value for the compound-index
 If you're querying for an entire compound key (not partial), you can use d/q as normal, using index-key for the value
 
 ```clojure
-(d/q '[:find ?e :in $ ?v :where [?e :event/user-at-type ?v]] db (index-key [:foo :bar :baz]))
+(d/q '[:find ?e :in $ ?v :where [?e :event/user-at-type ?v]] db (dci/index-key [:foo :bar :baz]))
 ```
 
 ### range
@@ -113,9 +120,7 @@ When querying across a range, e.g. all events in a single day, use dci/search-ra
 (dci/search-range db :event/user-at [1234 (-> (time/today-at-midnight) to-date)] [1234 (-> (time/today-at-midnight) (time/plus (time/days 1)) to-date)])
 ```
 
-Note that search-range is inclusive of the starting key, and exclusive of the ending key.
-
-Note that index-key converts values to resonable string representations, so j.u.Date instances can be passed in. (See the DatomicRepresentation Protocol in source)
+Note that index-key converts values to byte-array representations, so j.u.Date instances can be passed in. (See the Serialize Protocol in source)
 
 ## Partial
 When searching for a partial key (i.e. you know the first two values of a 3-value compound key) use dci/search:
@@ -133,13 +138,14 @@ dci/search-range also supports partial key searches:
 ```
 
 Under the covers, partial searches work by creating a partial
-index-key (i.e. a string shorter than the 'full' key), and then doing
-a substring match on values stored in the DB. Datomic indices are used
+index-key (i.e. a byte-array shorter than the 'full' key), and then
+matching on values stored in the DB. Datomic indices are used
 (d/seek-datoms, and d/index-range, respectively), so these are
 efficient.
 
 # Limitations
 
+- DCI stores attributes as *fixed width*. This is 8 bytes for longs, and 255 bytes for strings. Since String storage is expensive, it's recommended that you intern strings in another entity, and store the DBId instead, when possible.
 - index-key does not automatically update the compound index attribute when any of 'source' attributes change.
 - Using d/q with a partial index-key won't work because d/q doesn't support substring matches.
 - keys are sorted & searched via string representation, lexographically.
@@ -149,6 +155,7 @@ efficient.
 
 Note that dci is still very early. I'm using it in staging, but not yet production. If you do use it production, be able to re-create the values of your compound indices (i.e. store the component pieces in other attributes).
 
+- 0.2.0: switch to using byte-arrays rather than strings. More tests.
 - 0.1.2: made search-range inclusive of the end key. Add type hints.
 - 0.1.1: Added separator characters to all keys, even complete ones. This is a breaking schema change; meaning values inserted via 0.1.0 will not be accessible in 0.1.1 unless they're re-asserted.
 - 0.1.0: Initial Release
