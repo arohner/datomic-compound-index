@@ -128,9 +128,11 @@
   "Given an eid and the a compound-indexed attr, return the deserialized value"
   [db e attr]
   (let [meta-col (attr-meta-col-name attr)
-        k (d/pull db [attr meta-col] e)]
+        k (d/pull db [attr meta-col] e)
+        metadata (get k meta-col)]
+    (assert metadata)
     {:data (get k attr)
-     :metadata (fress/read (get k meta-col))}))
+     :metadata (fress/read metadata)}))
 
 (defn search
   "Search a compound index. attr is the attribute to search. Returns a seq of datoms. key is a vectors that will be passed to index-key.
@@ -163,18 +165,19 @@
         attr-id (:id (d/attribute db attr))]
     (->> (d/seek-datoms db :avet attr key1)
          (drop-while (fn [^Datum d]
-                       (let [vkey (deserialize! db (.e d) attr)
-                             result (key-compare vkey key1)]
-                         (and (not= :subkey-b result)
-                              (< result 0)))))
+                       (and (= attr-id (.a d))
+                            (let [vkey (deserialize! db (.e d) attr)
+                                  result (key-compare vkey key1)]
+                              (and (not= :subkey-b result)
+                                   (< result 0))))))
          (take-while (fn [^Datum d]
-                       (let [vkey (deserialize! db (.e d) attr)]
-                         (and (= attr-id (.a d))
-                              (let [result1 (delay (key-compare key1 vkey))
-                                    result2 (delay (key-compare vkey key2))]
-                                (or (= :subkey-a @result1)
-                                    (= :subkey-b @result2)
-                                    (and
-                                     (<= @result1 0)
-                                     (<= @result2 0))))))))
+                       (and (= attr-id (.a d))
+                            (let [vkey (deserialize! db (.e d) attr)
+                                  result1 (delay (key-compare key1 vkey))
+                                  result2 (delay (key-compare vkey key2))]
+                              (or (= :subkey-a @result1)
+                                  (= :subkey-b @result2)
+                                  (and
+                                   (<= @result1 0)
+                                   (<= @result2 0)))))))
          (seq))))
