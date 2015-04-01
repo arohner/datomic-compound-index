@@ -8,5 +8,5 @@
                                   [org.clojure/test.check "0.5.9"]]}
              :test {:jvm-opts ["-Xmx2048m"]}}
   :global-vars  {*warn-on-reflection* true}
-  :deploy-repositories [["releases" {:url "https://clojars.org"
+  :deploy-repositories [["releases" {:url "https://clojars.org/repo"
                                      :creds :gpg}]])
