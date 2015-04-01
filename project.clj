@@ -7,4 +7,5 @@
   :profiles {:dev {:dependencies [[com.datomic/datomic-free "0.9.5130"]
                                   [org.clojure/test.check "0.5.9"]]}
              :test {:jvm-opts ["-Xmx2048m"]}}
-  :global-vars  {*warn-on-reflection* true})
+  :global-vars  {*warn-on-reflection* true}
+  :repositories [["releases" "https://clojars.org/repo"]])
