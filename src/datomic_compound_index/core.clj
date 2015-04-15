@@ -144,13 +144,14 @@
          attr-id (:id (d/attribute db attr))]
      (->> (d/seek-datoms db :avet attr key)
           (drop-while (fn [^Datum d]
-                        (let [vkey (deserialize! db (.e d) attr)
-                              result (key-compare vkey key)]
-                          (and (not (= :subkey-b result))
-                               (< result 0)))))
+                        (or (not= attr-id (.a d))
+                            (let [vkey (deserialize! db (.e d) attr)
+                                  result (key-compare vkey key)]
+                              (and (not (= :subkey-b result))
+                                   (< result 0))))))
           (take-while (fn [^Datum d]
-                        (let [result (key-compare key (deserialize! db (.e d) attr))]
-                          (and (= attr-id (.a d))
+                        (and (= attr-id (.a d))
+                             (let [result (key-compare key (deserialize! db (.e d) attr))]
                                (or (= :subkey-a result)
                                    (= 0 result))))))
           (seq)))))
@@ -165,11 +166,11 @@
         attr-id (:id (d/attribute db attr))]
     (->> (d/seek-datoms db :avet attr key1)
          (drop-while (fn [^Datum d]
-                       (and (= attr-id (.a d))
-                            (let [vkey (deserialize! db (.e d) attr)
-                                  result (key-compare vkey key1)]
-                              (and (not= :subkey-b result)
-                                   (< result 0))))))
+                       (or (not= attr-id (.a d))
+                           (let [vkey (deserialize! db (.e d) attr)
+                                 result (key-compare vkey key1)]
+                             (and (not= :subkey-b result)
+                                  (< result 0))))))
          (take-while (fn [^Datum d]
                        (and (= attr-id (.a d))
                             (let [vkey (deserialize! db (.e d) attr)
