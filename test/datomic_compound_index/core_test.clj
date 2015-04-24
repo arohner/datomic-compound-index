@@ -67,7 +67,9 @@
        [0 1] [0 1] 0
        [0 2] [0 1] 1
        [0] [0 0] :subkey-a
-       [0] [0 1] :subkey-a))
+       [0] [0 1] :subkey-a
+       
+       [128] [127] 1))
 
 (deftest ordering-tests
   (are [x y expected] (and (= true (ordering-test < x y))

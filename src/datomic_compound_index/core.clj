@@ -150,8 +150,8 @@
         (= pos alast) :subkey-a
         (= pos blast) :subkey-b
         :else
-        (let [abyte (aget ^bytes adata pos)
-              bbyte (aget ^bytes bdata pos)
+        (let [abyte (bit-and (aget ^bytes adata pos) 0xff)
+              bbyte (bit-and (aget ^bytes bdata pos) 0xff)
               astop (-> ameta :pos second)
               bstop (-> bmeta :pos second)]
           (cond
