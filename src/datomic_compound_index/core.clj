@@ -155,11 +155,9 @@
               astop (-> ameta :pos second)
               bstop (-> bmeta :pos second)]
           (cond
-            (= pos astop bstop) (recur (inc pos) (rest ametas) (rest bmetas))
-            (= pos astop) -1
-            (= pos bstop) 1
             (< abyte bbyte) -1
             (> abyte bbyte) 1
+            (= pos astop bstop) (recur (inc pos) (rest ametas) (rest bmetas))
             (= abyte bbyte) (recur (inc pos) ametas bmetas)
             :else (assert false)))))))
 
