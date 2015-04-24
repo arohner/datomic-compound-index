@@ -155,6 +155,8 @@ efficient.
 
 Note that dci is still very early. I'm using it in staging, but not yet production. If you do use it production, be able to re-create the values of your compound indices (i.e. store the component pieces in other attributes).
 
+- 0.2.5: Fix a bug that caused incorrect results due to java signed bytes
+- 0.2.4: fixes an exception caused by going out-of-bounds with d/seek-datoms
 - 0.2.0: switch to using byte-arrays rather than strings. More tests.
 - 0.1.2: made search-range inclusive of the end key. Add type hints.
 - 0.1.1: Added separator characters to all keys, even complete ones. This is a breaking schema change; meaning values inserted via 0.1.0 will not be accessible in 0.1.1 unless they're re-asserted.
