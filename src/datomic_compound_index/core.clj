@@ -42,11 +42,50 @@
         (.putLong (+ x (bit-shift-left 1 62)))
         (.array))))
 
+(defn from-bytes-dispatch [type bytes]
+  (if (integer? type)
+    (get (set/map-invert classmap) type)
+    type))
+
+(defmulti from-bytes #'from-bytes-dispatch)
+
+(defmethod from-bytes String [_ x]
+  (String. x))
+
+(defmethod from-bytes java.util.Date [_ x]
+  (Date. (from-bytes java.lang.Long x)))
+
+(defmethod from-bytes Long [_ x]
+  (-> (ByteBuffer/allocate 8)
+      (.put x)
+      (.flip)
+      (.getLong)
+      (- (bit-shift-left 1 62))))
+
 (defn serialize [x]
   (let [bytes (to-bytes x)]
     {:data bytes
      :metadata {:type (classmap (class x))
                 :len (count bytes)}}))
+
+(defn ->human
+  "Debugging/repl utility. Returns a human-readable representation of the key."
+  [key]
+  (let [{:keys [data metadata]} key]
+    (assert data)
+    (assert metadata)
+    (for [m metadata
+          :let [arr-len (- (-> m :pos second) (-> m :pos first))
+                bytes (byte-array arr-len)
+                _ (System/arraycopy data (-> m :pos first) bytes 0 arr-len)]]
+      (do
+        (from-bytes (:type m) bytes)))))
+
+(defn ->binary-str [key]
+  (->>
+   (for [b (:data key)]
+     (str/replace (format "%8s" (Integer/toBinaryString (bit-and b 0xFF))) " " "0"))
+   (apply str "0b")))
 
 (defn concat-bytes [arrs]
   (let [len (reduce + (map count arrs))
