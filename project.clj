@@ -1,4 +1,4 @@
-(defproject datomic-compound-index "0.2.6-SNAPSHOT"
+(defproject datomic-compound-index "0.2.6"
   :description "A small library for adding compound indices to Datomic"
   :url "https://github.com/arohner/datomic-compound-index"
   :license {:name "Eclipse Public License"
