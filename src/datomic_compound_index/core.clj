@@ -29,6 +29,21 @@
                clojure.lang.Keyword 2
                java.util.Date 3})
 
+(defn int->bytes
+  "Due to JVM stupidity about all bytes being signed, we can't use the
+  8th bit of every byte, or else the byte array comparison will
+  break. "
+  [x]
+  (loop [result (list)
+         x (+ x (bit-shift-left 1 55))]
+    (if (and (not= x 0)
+             (not= x -1))
+      (recur (conj result (bit-and x 0x7f))
+             (bit-shift-right x 7))
+      (do
+        (assert (= 8 (count result)) "number too large to fit in 8 bytes")
+        result))))
+
 (extend-protocol Serialize
   String
   (to-bytes [x]
@@ -38,9 +53,10 @@
     (to-bytes (.getTime x)))
   java.lang.Long
   (to-bytes [x]
-    (-> (ByteBuffer/allocate 8)
-        (.putLong (+ x (bit-shift-left 1 62)))
-        (.array))))
+    (let [bb (ByteBuffer/allocate 8)]
+      (doseq [b (int->bytes x)]
+        (.put bb ^byte b))
+      (.array bb))))
 
 (defn from-bytes-dispatch [type bytes]
   (if (integer? type)
@@ -49,13 +65,13 @@
 
 (defmulti from-bytes #'from-bytes-dispatch)
 
-(defmethod from-bytes String [_ x]
+(defmethod from-bytes String [_ ^bytes x]
   (String. x))
 
 (defmethod from-bytes java.util.Date [_ x]
-  (Date. (from-bytes java.lang.Long x)))
+  (Date. ^Long (from-bytes java.lang.Long x)))
 
-(defmethod from-bytes Long [_ x]
+(defmethod from-bytes Long [_ ^bytes x]
   (-> (ByteBuffer/allocate 8)
       (.put x)
       (.flip)
@@ -80,6 +96,12 @@
                 _ (System/arraycopy data (-> m :pos first) bytes 0 arr-len)]]
       (do
         (from-bytes (:type m) bytes)))))
+
+(defn int->binary-str [i]
+  (->>
+   (for [b (to-bytes i)]
+     (str/replace (format "%8s" (Integer/toBinaryString (bit-and b 0xFF))) " " "0"))
+   (apply str "0b")))
 
 (defn ->binary-str [key]
   (->>
@@ -188,7 +210,8 @@
                                    (< result 0))))))
           (take-while (fn [^Datum d]
                         (and (= attr-id (.a d))
-                             (let [result (key-compare key (deserialize! db (.e d) attr))]
+                             (let [vkey (deserialize! db (.e d) attr)
+                                   result (key-compare key vkey)]
                                (or (= :subkey-a result)
                                    (= 0 result))))))
           (seq)))))

@@ -145,16 +145,24 @@ efficient.
 
 # Limitations
 
-- DCI stores attributes as *fixed width* byte arrays. This is 8 bytes for longs, and 255 bytes for strings. Since String storage is expensive, it's recommended that you intern strings in another entity, and store the DBId instead, when possible.
-- index-key does not automatically update the compound index attribute when any of 'source' attributes change.
+- DCI stores attributes as *fixed width* byte arrays. This is 8 bytes
+  for longs, and 255 bytes for strings. Since String storage is
+  expensive, it's highly recommended that you intern strings in
+  another entity, and store the DBId instead, when possible.
+- Due to bytes being signed on the JVM, and Datomic's byte-array
+  comparison, longs can only use 7 bits out of each byte. This limits the
+  maximum number that can be stored to 2^55 - 1, rather than the 2^64
+  - 1 you'd expect from an 8-byte long.
+- index-key does not automatically update the compound index attribute
+  when any of 'source' attributes change.
 - Using d/q with a partial index-key won't work.
-- keys are sorted & searched via string representation, lexographically.
 - datomic supports using re-find in a database function, but AFAICT, there's no way for it to use an index, so avoid re-find.
 
 # Changelog
 
 Note that dci is still very early. I'm using it in staging, but not yet production. If you do use it production, be able to re-create the values of your compound indices (i.e. store the component pieces in other attributes).
 
+- 0.3.0: store longs in 7 bits per byte. This is a breaking schema change.
 - 0.2.5: Fix a bug that caused incorrect results due to java signed bytes
 - 0.2.4: fixes an exception caused by going out-of-bounds with d/seek-datoms
 - 0.2.0: switch to using byte-arrays rather than strings. More tests.

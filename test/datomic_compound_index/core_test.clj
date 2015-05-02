@@ -37,7 +37,7 @@
 
 (defspec index-key-works
   100
-  (prop/for-all [v gen-supported-values]
+   (prop/for-all [v gen-supported-values]
     (let [resp (index-key [v])]
       (and resp
            (:data resp)
@@ -68,8 +68,9 @@
        [0 2] [0 1] 1
        [0] [0 0] :subkey-a
        [0] [0 1] :subkey-a
-       
-       [128] [127] 1))
+
+       [128] [127] 1
+       [127] [128] -1))
 
 (deftest ordering-tests
   (are [x y expected] (and (= true (ordering-test < x y))
@@ -325,3 +326,28 @@
   (search-range-test [[0 0] [1 1] [2 2]] [[-2 -2] [-3 -3]] #{})
   (search-range-test [[0 0] [1 1] [2 2]] [[-1 -2] [-3 -3]] #{})
   (search-range-test [[-2 0] [1 2]] [[-4 0] [4 1]] #{[-2 0] [1 2]}))
+
+(defn sorted-bytes [ints]
+  (let [conn (empty-database)]
+    @(d/transact conn int-schema)
+    @(d/transact conn (vec (map (fn [i]
+                                  (let [bytes (to-bytes i)]
+                                    (->binary-str {:data bytes})
+                                    {:db/id (d/tempid :db.part/user)
+                                     :user/foo i
+                                     :user/foo-bar bytes})) ints)))
+    (let [db (d/db conn)
+          result (->>
+                  (d/datoms (d/db conn) :avet :user/foo-bar)
+                  (seq)
+                  (vec)
+                  (map (fn [d]
+                         (:user/foo (d/pull db [:user/foo] (.e d)))))
+                  vec)
+          expected (vec (sort ints))]
+      (= expected result))))
+
+(defspec sorted-bytes-works
+  1000
+  (prop/for-all [ints (gen/vector gen/int)]
+    (sorted-bytes ints)))
