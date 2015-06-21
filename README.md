@@ -76,6 +76,12 @@ This can also be extended past two attributes. Let's say we want to find all eve
 
 (of course, if your DB has :event/user-at-type, then :event/user-at is unnecessary).
 
+# Features
+
+- efficiently query on attributes comprised of multiple values
+- efficiently query on partial keys, i.e. an attribute indexed on 3
+- attributes, and you know the first two parts.
+
 # Usage
 
 dci provides functions for the use cases described
@@ -86,8 +92,7 @@ Create an indexed attribute, of type bytes. Create a second attribute
 of type bytes with the same name, with the suffix "-metadata". If the
 indexed attribute is named ":user/foo", the second attribute would be
 named ":user/foo-metadata". In a comment/docstring, specify the type
-and order of values that will be indexed. Every entity must use values
-of the same type, in the same order.
+and order of values that will be indexed.
 
 When inserting new entities,
 use insert-index-key to create the value for the compound-indexed attribute:
@@ -96,17 +101,24 @@ use insert-index-key to create the value for the compound-indexed attribute:
 (let [event-at (Date.)
       user-id 1234
       event-type :foo]
-  (d/transact conn [(merge
+  @(d/transact conn [(merge
                      {:db/id (d/tempid :eventss)
                       :event/type event-type}
                       (dci/insert-index-key :event/user-at-type [user-id event-at event-type]))]))
 ```
 
+`insert-index-key` takes two args, the compound attribute, and a
+vector of values. Every entity with this attribute must use values of
+the same type, in the same order. insert-index-key returns a map
+containing {<attr> <bytes>, <attr-metadata> <bytes>}, so it should be
+merged in with the entity map. Values can be String or Long (or
+something that implements d-c-i.core/Serialize, see below).
+
 ## Query
 
 ## single key
 
-If you're querying for an entire compound key (not partial), you can use d/q as normal, using index-key for the value
+If you're querying for an entire compound key (not partial), you can use `d/q` as normal, using index-key for the value
 
 ```clojure
 (d/q '[:find ?e :in $ ?v :where [?e :event/user-at-type ?v]] db (dci/index-key [:foo :bar :baz]))
@@ -120,7 +132,9 @@ When querying across a range, e.g. all events in a single day, use dci/search-ra
 (dci/search-range db :event/user-at [1234 (-> (time/today-at-midnight) to-date)] [1234 (-> (time/today-at-midnight) (time/plus (time/days 1)) to-date)])
 ```
 
-Note that index-key converts values to byte-array representations, so j.u.Date instances can be passed in. (See the Serialize Protocol in source)
+`search-range` takes two keys, and returns the seq of datoms between them.
+
+(Note that index-key converts values to byte-array representations, so j.u.Date instances can be passed in. (See the Serialize Protocol in source))
 
 ## Partial
 When searching for a partial key (i.e. you know the first two values of a 3-value compound key) use dci/search:
@@ -145,18 +159,16 @@ efficient.
 
 # Limitations
 
-- DCI stores attributes as *fixed width* byte arrays. This is 8 bytes
+- DCI stores attributes as *fixed width* byte arrays. This is 8 bytes *per value*,
   for longs, and 255 bytes for strings. Since String storage is
   expensive, it's highly recommended that you intern strings in
-  another entity, and store the DBId instead, when possible.
+  another entity, and store the db/id instead, when possible.
 - Due to bytes being signed on the JVM, and Datomic's byte-array
   comparison, longs can only use 7 bits out of each byte. This limits the
-  maximum number that can be stored to 2^55 - 1, rather than the 2^64
-  - 1 you'd expect from an 8-byte long.
+  maximum number that can be stored to 2^55 - 1, rather than the 2^64 - 1 you'd expect from an 8-byte long.
 - index-key does not automatically update the compound index attribute
   when any of 'source' attributes change.
 - Using d/q with a partial index-key won't work.
-- datomic supports using re-find in a database function, but AFAICT, there's no way for it to use an index, so avoid re-find.
 
 # Changelog
 
