@@ -91,9 +91,9 @@
     (assert data)
     (assert metadata)
     (for [m metadata
-          :let [arr-len (- (-> m :pos second) (-> m :pos first))
+          :let [arr-len (- (-> m :pos (nth 1)) (-> m :pos (nth 0)))
                 bytes (byte-array arr-len)
-                _ (System/arraycopy data (-> m :pos first) bytes 0 arr-len)]]
+                _ (System/arraycopy data (-> m :pos (nth 0)) bytes 0 arr-len)]]
       (do
         (from-bytes (:type m) bytes)))))
 
@@ -165,8 +165,8 @@
     (assert adata)
     (assert bdata)
     (loop [pos 0
-           ameta (-> ametas first)
-           bmeta (-> bmetas first)]
+           ameta (-> ametas (nth 0))
+           bmeta (-> bmetas (nth 0))]
       (cond
         (= pos alast blast) 0
         (= pos alast) :subkey-a
@@ -174,8 +174,8 @@
         :else
         (let [abyte (bit-and (aget ^bytes adata pos) 0xff)
               bbyte (bit-and (aget ^bytes bdata pos) 0xff)
-              astop (-> ameta :pos second)
-              bstop (-> bmeta :pos second)]
+              astop (-> ameta :pos (nth 1))
+              bstop (-> bmeta :pos (nth 1))]
           (cond
             (< abyte bbyte) -1
             (> abyte bbyte) 1
