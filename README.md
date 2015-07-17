@@ -174,6 +174,7 @@ efficient.
 
 Note that dci is still very early. I'm using it in staging, but not yet production. If you do use it production, be able to re-create the values of your compound indices (i.e. store the component pieces in other attributes).
 
+- 0.3.1: small performance improvements in `search` and `searc-range`
 - 0.3.0: store longs in 7 bits per byte. This is a breaking schema change.
 - 0.2.5: Fix a bug that caused incorrect results due to java signed bytes
 - 0.2.4: fixes an exception caused by going out-of-bounds with d/seek-datoms
