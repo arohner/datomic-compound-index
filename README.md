@@ -4,7 +4,16 @@ A library that adds support for simple compound indices to datomic.
 
 # Not Functional
 
-Due to limitations in Datomic, this library cannot work. Code is left here in case it's useful to anyone.
+Due to limitations in Datomic, this library cannot work as orginally designed. Code is left here in case it's useful to anyone.
+
+DCI uses byte-arrays to form compound keys. Datomic relies on the
+JVM's implementation of hashcode() and compare() to correctly sort
+values in the datomic indexes. Since `hashcode` and `compare` are
+completely inadequate (they don't actually sort by contents), DCI ends
+up storing elements randomly, so lookup is `O(n)` rather than
+`O(log(n))`.
+
+The concepts behind DCI are probably sounds, and the approach should work with some other type that can smuggle bytes correctly, presumably BigInt
 
 # Installation
 
